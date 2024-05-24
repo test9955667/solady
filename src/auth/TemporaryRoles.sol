@@ -470,5 +470,4 @@ abstract contract TimedOwnableRoles is Ownable {
     uint256 internal constant _ROLE_125 = 1 << 125;
     uint256 internal constant _ROLE_126 = 1 << 126;
     uint256 internal constant _ROLE_127 = 1 << 127;
-    uint256 internal constant _ROLE_128 = 1 << 128;
 }
