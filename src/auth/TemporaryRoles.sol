@@ -32,6 +32,10 @@ abstract contract TimedOwnableRoles is Ownable {
     uint256 private constant _ROLES_UPDATED_EVENT_SIGNATURE =
         0x715ad5ce61fc9595c7b415289d59cf203f23a94fa06f04af7e489a0a76e1fe26;
 
+    /// @dev `keccak256(bytes("RoleExpiryUpdated(address,uint256,uint32)"))`.
+    uint256 private constant _ROLE_EXPIRY_UPDATED_EVENT_SIGNATURE =
+        0x66ad9119f4938f614ae53cf3a9a3499a5ac99fd91a1fb967a78dad2d49e60ee1;
+
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
     /*                          STORAGE                           */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
@@ -86,15 +90,18 @@ abstract contract TimedOwnableRoles is Ownable {
         assembly {
             // @todo implement more efficient functions for people using fewer roles
             // I think this is good for getting bit index for > 10 roles
+
             // 1) Get the position of the role bit using a debruijn sequence
 
-            // Make sure only 1 role (1 bit) is passed @todo require
+            // Make sure only 1 role (1 bit) is passed
+            // @todo require with custom error instead of cleaning
             timedRole := and(timedRole, sub(0, timedRole))
 
+            // Debruijn hash of the flag, key-index in the positions table
             let tablePos := shr(248, mul(timedRole, DEBRUIJN_256))
 
+            // Get which word in the 8-word table contains the position byte
             let table := TABLE_0
-
             switch div(tablePos, 32)
             case 1 { table := TABLE_1 }
             case 2 { table := TABLE_2 }
@@ -105,7 +112,10 @@ abstract contract TimedOwnableRoles is Ownable {
             case 7 { table := TABLE_7 }
             default {}
 
-            roleIdx := and(shr(sub(248, mul(mod(tablePos, 32), 8)), table), 0xFF)
+            // Grab the single byte at the key in the table ()
+            roleIdx := and(shr(sub(248, mul(mod(tablePos, 32), 8)), table), 255)
+
+            // Only ~800 gas so far
 
             // 2) Set the expiry in the expiries mapping at the role index
 
@@ -119,12 +129,15 @@ abstract contract TimedOwnableRoles is Ownable {
             // // Set expiry in its place
             expiries := or(expiries, shl(mul(32, mod(roleIdx, 8)), expiry))
 
+            // ~3k gas so far
+
             // Store the new and neighboring expiries
             sstore(add(keccak256(0x0c, 0x00), div(roleIdx, 8)), expiries)
-            // // @todo emit event here
+            log4(0, 0, _ROLE_EXPIRY_UPDATED_EVENT_SIGNATURE, shr(96, mload(0x0c)), timedRole, expiry) //
 
-            // // @todo this is probably an issue
-            // // 3) Set temporary role (ROLE << 127)
+            // 3) Set temporary role (ROLE << 127)
+            // @todo Needs better internal / external semantics to where timed roles exist in storage
+
             mstore(0x0c, _ROLE_SLOT_SEED)
             // mstore(0x00, user)
             // Store the new value.
@@ -132,9 +145,8 @@ abstract contract TimedOwnableRoles is Ownable {
             // Emit the {RolesUpdated} event.
             log3(0, 0, _ROLES_UPDATED_EVENT_SIGNATURE, shr(96, mload(0x0c)), shl(127, timedRole))
 
+            // ~50k gas
         }
-        revert LogUint(roleIdx / 8);
-        //revert LogBytes(expiries);
     }
 
     /// @dev Updates the roles directly without authorization guard.
