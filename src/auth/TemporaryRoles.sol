@@ -74,11 +74,19 @@ abstract contract TimedOwnableRoles is Ownable {
         _setTimedRole(user, timedRole, expiry);
     }
 
+    function _getRoleExpiry(address user, uint128 timedRole) internal {
+
+    }
+
     function _setTimedRole(address user, uint128 timedRole, uint32 expiry) internal {
 
+        bytes32 expiries;
+        uint256 roleIdx;
         // @todo test and make memory safe
         assembly {
-            // 1) Get the position of the role bit using a debrujin sequence @todo implement more efficient functions for people using fewer roles
+            // @todo implement more efficient functions for people using fewer roles
+            // I think this is good for getting bit index for > 10 roles
+            // 1) Get the position of the role bit using a debruijn sequence
 
             // Make sure only 1 role (1 bit) is passed @todo require
             timedRole := and(timedRole, sub(0, timedRole))
@@ -97,31 +105,36 @@ abstract contract TimedOwnableRoles is Ownable {
             case 7 { table := TABLE_7 }
             default {}
 
-            let roleIdx := and(shr(sub(248, mul(mod(tablePos, 32), 8)), table), 0xFF)
+            roleIdx := and(shr(sub(248, mul(mod(tablePos, 32), 8)), table), 0xFF)
 
             // 2) Set the expiry in the expiries mapping at the role index
 
             // Load expiries
-            let expiries := sload(add(keccak256(_EXPIRY_SLOT_SEED, user), div(roleIdx, 7)))
+            mstore(0x0c, _EXPIRY_SLOT_SEED)
+            mstore(0x00, user)
+            expiries := sload(add(keccak256(0x0c, 0x00), div(roleIdx, 8)))
+
             // Clear out any bits at the previous expiry for the role
-            expiries := and(expiries, not(shl(mod(roleIdx, 32), 0xFFFF)))
-            // Set expiry in its place
-            expiries := or(expiries, shl(mul(32, roleIdx), expiry))
+            expiries := and(expiries, not(shl(mod(roleIdx, 8), 0xFFFF)))
+            // // Set expiry in its place
+            expiries := or(expiries, shl(mul(32, mod(roleIdx, 8)), expiry))
 
             // Store the new and neighboring expiries
-            sstore(add(keccak256(_EXPIRY_SLOT_SEED, user), div(roleIdx, 7)), expiries)
-            // @todo emit event here
+            sstore(add(keccak256(0x0c, 0x00), div(roleIdx, 8)), expiries)
+            // // @todo emit event here
 
-            // @todo this is probably an issue
-            // 3) Set temporary role (ROLE << 127)
+            // // @todo this is probably an issue
+            // // 3) Set temporary role (ROLE << 127)
             mstore(0x0c, _ROLE_SLOT_SEED)
-            mstore(0x00, user)
+            // mstore(0x00, user)
             // Store the new value.
             sstore(keccak256(0x0c, 0x20), shl(127, timedRole))
             // Emit the {RolesUpdated} event.
             log3(0, 0, _ROLES_UPDATED_EVENT_SIGNATURE, shr(96, mload(0x0c)), shl(127, timedRole))
 
         }
+        revert LogUint(roleIdx / 8);
+        //revert LogBytes(expiries);
     }
 
     /// @dev Updates the roles directly without authorization guard.
